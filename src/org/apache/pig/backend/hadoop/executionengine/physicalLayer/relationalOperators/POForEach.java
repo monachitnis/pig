@@ -38,7 +38,6 @@ import org.apache.pig.data.DataBag;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.SchemaTupleClassGenerator.GenContext;
 import org.apache.pig.data.SchemaTupleFactory;
-import org.apache.pig.data.SingleTupleBag;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
 import org.apache.pig.data.TupleMaker;
@@ -416,9 +415,6 @@ public class POForEach extends PhysicalOperator {
 
                 if(inputData.result instanceof DataBag && isToBeFlattenedArray[i]) {
                     its[i] = ((DataBag)bags[i]).iterator();
-                } else if (inputData.result != null){
-                    its[i] = new SingleTupleBag(TupleFactory.getInstance()
-                            .newTuple(inputData.result)).iterator();
                 } else {
                     its[i] = null;
                 }
