@@ -275,6 +275,8 @@ public abstract class HExecutionEngine implements ExecutionEngine {
             disabledOptimizerRules.add("ColumnMapKeyPrune");
             disabledOptimizerRules.add("AddForEach");
             disabledOptimizerRules.add("GroupByConstParallelSetter");
+            disabledOptimizerRules.add("NestedForEachUserFunc");
+
         }
 
         StoreAliasSetter storeAliasSetter = new StoreAliasSetter(plan);

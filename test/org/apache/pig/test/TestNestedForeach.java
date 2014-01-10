@@ -22,10 +22,11 @@ import java.util.Iterator;
 
 import junit.framework.Assert;
 
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
 import org.apache.pig.data.Tuple;
-import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.junit.AfterClass;
 import org.junit.Test;
 
@@ -35,7 +36,7 @@ public class TestNestedForeach {
 	private PigServer pig ;
 
 	public TestNestedForeach() throws Throwable {
-		pig = new PigServer(ExecType.MAPREDUCE, cluster.getProperties()) ;
+		pig = new PigServer(ExecType.LOCAL, cluster.getProperties()) ;
 	}
 
 	Boolean[] nullFlags = new Boolean[]{ false, true };
@@ -53,7 +54,7 @@ public class TestNestedForeach {
 				"1\t3"
 		};
 
-		Util.createInputFile(cluster, "table_nf_proj", input);
+		//Util.createInputFile(FileSystem.getLocal(new Configuration()), "table_nf_proj", input);
 
 		pig.registerQuery("a = load 'table_nf_proj' as (a0:int, a1:int);\n");
 		pig.registerQuery("b = group a by a0;\n");
@@ -63,7 +64,7 @@ public class TestNestedForeach {
 		String[] expected = new String[] {"({(2),(3)})", "({(7)})"};
 
         Util.checkQueryOutputsAfterSortRecursive(iter, expected, org.apache.pig.newplan.logical.Util.translateSchema(pig.dumpSchema("c")));
-    
+
 	}
 
 	@Test
@@ -81,7 +82,7 @@ public class TestNestedForeach {
 		pig.registerQuery("c = foreach b { c1 = foreach a generate 2 * a1; generate c1; }\n");
 
 		Iterator<Tuple> iter = pig.openIterator("c");
-		
+
         String[] expected = new String[] {"({(4),(6)})", "({(14)})"};
 
         Util.checkQueryOutputsAfterSortRecursive(iter, expected, org.apache.pig.newplan.logical.Util.translateSchema(pig.dumpSchema("c")));
@@ -95,14 +96,14 @@ public class TestNestedForeach {
 				"1\tworld"
 		};
 
-		Util.createInputFile(cluster, "table_nf_udf", input);
+		//Util.createInputFile(FileSystem.getLocal(new Configuration()), "table_nf_udf", input);
 
 		pig.registerQuery("a = load 'table_nf_udf' as (a0:int, a1:chararray);\n");
 		pig.registerQuery("b = group a by a0;\n");
 		pig.registerQuery("c = foreach b { c1 = foreach a generate UPPER(a1); generate c1; }\n");
 
 		Iterator<Tuple> iter = pig.openIterator("c");
-		
+
         String[] expected = new String[] {"({(HELLO),(WORLD)})", "({(PIG)})"};
 
         Util.checkQueryOutputsAfterSortRecursive(iter, expected, org.apache.pig.newplan.logical.Util.translateSchema(pig.dumpSchema("c")));
@@ -123,8 +124,8 @@ public class TestNestedForeach {
 		pig.registerQuery("c = foreach b { c1 = foreach a generate FLATTEN(TOKENIZE(a1)); generate c1; }\n");
 
 		Iterator<Tuple> iter = pig.openIterator("c");
-		
-        String[] expected = new String[] {"({(hello),(world),(pig),(hello),(pig)})", 
+
+        String[] expected = new String[] {"({(hello),(world),(pig),(hello),(pig)})",
                 "({(hadoop),(world)})"};
 
         Util.checkQueryOutputsAfterSortRecursive(iter, expected, org.apache.pig.newplan.logical.Util.translateSchema(pig.dumpSchema("c")));
@@ -138,7 +139,7 @@ public class TestNestedForeach {
 				"1\t3"
 		};
 
-		Util.createInputFile(cluster, "table_nf_filter", input);
+		Util.createInputFile(FileSystem.getLocal(new Configuration()), "table_nf_filter", input);
 
 		pig.registerQuery("a = load 'table_nf_filter' as (a0:int, a1:int);\n");
 		pig.registerQuery("b = group a by a0;\n");
@@ -181,7 +182,7 @@ public class TestNestedForeach {
 		t = iter.next();
 		Assert.assertTrue(t.toString().equals("({(7)})"));
 	}
-	
+
 	// See PIG-2563
 	@Test
     public void testNestedForeach() throws Exception {

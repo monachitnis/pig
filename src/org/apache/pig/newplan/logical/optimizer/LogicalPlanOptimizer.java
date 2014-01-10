@@ -38,6 +38,7 @@ import org.apache.pig.newplan.logical.rules.LoadTypeCastInserter;
 import org.apache.pig.newplan.logical.rules.LogicalExpressionSimplifier;
 import org.apache.pig.newplan.logical.rules.MergeFilter;
 import org.apache.pig.newplan.logical.rules.MergeForEach;
+import org.apache.pig.newplan.logical.rules.NestedForEachUserFunc;
 import org.apache.pig.newplan.logical.rules.PartitionFilterOptimizer;
 import org.apache.pig.newplan.logical.rules.PushDownForEachFlatten;
 import org.apache.pig.newplan.logical.rules.PushUpFilter;
@@ -177,6 +178,16 @@ public class LogicalPlanOptimizer extends PlanOptimizer {
         s = new HashSet<Rule>();
         // Optimize limit
         r = new LimitOptimizer("LimitOptimizer");
+        checkAndAddRule(s, r);
+        if (!s.isEmpty())
+            ls.add(s);
+
+        // Add NestedForEachUserFunc set
+        // This set of rules avoid duplicate calls to user func
+        // in a nested foreach structure
+        s = new HashSet<Rule>();
+        // Optimize limit
+        r = new NestedForEachUserFunc("NestedForEachUserFunc");
         checkAndAddRule(s, r);
         if (!s.isEmpty())
             ls.add(s);
