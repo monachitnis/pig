@@ -1,16 +1,21 @@
 package org.apache.pig.newplan.logical.rules;
 
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.pig.impl.logicalLayer.FrontendException;
+import org.apache.pig.impl.util.Pair;
 import org.apache.pig.newplan.Operator;
 import org.apache.pig.newplan.OperatorPlan;
 import org.apache.pig.newplan.OperatorSubPlan;
 import org.apache.pig.newplan.logical.expression.LogicalExpression;
+import org.apache.pig.newplan.logical.expression.LogicalExpressionPlan;
+import org.apache.pig.newplan.logical.expression.ProjectExpression;
 import org.apache.pig.newplan.logical.expression.UserFuncExpression;
 import org.apache.pig.newplan.logical.relational.LOForEach;
-import org.apache.pig.newplan.logical.relational.LOInnerLoad;
+import org.apache.pig.newplan.logical.relational.LOGenerate;
 import org.apache.pig.newplan.logical.relational.LogicalPlan;
 import org.apache.pig.newplan.logical.relational.LogicalRelationalOperator;
 import org.apache.pig.newplan.optimizer.Rule;
@@ -24,16 +29,10 @@ public class NestedForEachUserFunc extends Rule {
 
     @Override
     protected OperatorPlan buildPattern() {
-        // the pattern that this rule looks for
-        // is ForEach -> UserFunc
         LogicalPlan plan = new LogicalPlan();
         LogicalRelationalOperator foreach = new LOForEach(plan);
-        LogicalExpression userfunc = new UserFuncExpression(plan, null);
 
         plan.add(foreach);
-        plan.add(userfunc);
-        plan.connect(foreach, userfunc);
-
         return plan;
     }
 
@@ -45,8 +44,8 @@ public class NestedForEachUserFunc extends Rule {
     public class NestedForEachUserFuncTransformer extends Transformer {
 
         LOForEach foreach = null;
-        LogicalExpression userfunc = null;
-        LogicalRelationalOperator forEachSucc = null;
+        Set<Pair<Pair<Long, Integer>, UserFuncExpression>> userFuncSet;
+        Iterator<Pair<Pair<Long, Integer>, UserFuncExpression>> listIter;
         OperatorSubPlan subPlan = null;
 
         @Override
@@ -60,22 +59,55 @@ public class NestedForEachUserFunc extends Rule {
                     break;
                 }
             }
-            LogicalPlan innerPlan = foreach.getInnerPlan();
-            List<Operator> succs = innerPlan.getSuccessors(foreach);
-            for (int j = 0; j < succs.size(); j++) {
-                LogicalRelationalOperator logRelOp = (LogicalRelationalOperator) succs
-                        .get(j);
-                if (logRelOp instanceof LOInnerLoad) {
-                    // infer nested foreach
-                    nested = true;
-                    break;
-                }
+            // 1. infer nested foreach
+            OperatorPlan innerPlan = foreach.getPlan();
+            Operator pred = innerPlan.getPredecessors(foreach).get(0);
+
+            if (pred instanceof LOForEach) {
+                nested = true;
             }
+            // 2. traverse and record userfunc instances and count
             if (nested) {
-                List<Operator> ops = innerPlan.getSinks();
-                for (Operator op : ops) {
-                    if (op instanceof UserFuncExpression) {
-                        return true;
+                OperatorPlan inner = foreach.getInnerPlan();
+                Iterator<Operator> iter2 = inner.getOperators();
+                while (iter2.hasNext()) {
+                    Operator op = iter2.next();
+                    if (op instanceof LOGenerate) {
+                        List<LogicalExpressionPlan> generatePlan = ((LOGenerate) op).getOutputPlans();
+                        Iterator<LogicalExpressionPlan> lepIter = generatePlan.iterator();
+                        while (lepIter.hasNext()) {
+                            Iterator<Operator> expIter = lepIter.next().getOperators();
+                            while (expIter.hasNext()) {
+                                Operator expOp = expIter.next();
+                                if (expOp instanceof UserFuncExpression) {
+                                    Operator column = expOp.getPlan().getSuccessors(expOp).get(0);
+                                    long col = ((ProjectExpression)column).getColNum();
+                                    if (userFuncSet == null) {
+                                        userFuncSet = new HashSet<Pair<Pair<Long, Integer>, UserFuncExpression>>();
+                                    }
+                                    listIter = userFuncSet.iterator();
+                                    while (listIter.hasNext()) {
+                                        Pair<Pair<Long, Integer>, UserFuncExpression> func = listIter.next();
+                                        if (func.second == expOp) {
+                                            func.first.second++;
+                                        }
+                                    }
+                                    userFuncSet.add(new Pair(new Pair(col, 0), expOp));
+                                }
+                                break;
+                            }
+                        }
+                        break;
+                    }
+                }
+                if (userFuncSet != null && !userFuncSet.isEmpty()) {
+                    listIter = userFuncSet.iterator();
+                    while (listIter.hasNext()) {
+                        Pair<Pair<Long, Integer>, UserFuncExpression> func = listIter.next();
+                        if (func.first.second > 1) {
+                            // even if true for one, match is overall true
+                            return true;
+                        }
                     }
                 }
             }
@@ -89,34 +121,17 @@ public class NestedForEachUserFunc extends Rule {
             subPlan = new OperatorSubPlan(currentPlan);
             LogicalExpression userfunc = null;
 
-            // DFS to userfunc
-            for (Operator op1 : sinks1) {
-                if (op1 instanceof UserFuncExpression) {
-                    userfunc = (UserFuncExpression) op1;
-                }
-                if (op1.getPlan().getSinks() != null) {
-                    List<Operator> sinks2 = op1.getPlan().getSinks();
-                    for (Operator op2 : sinks2) {
-                        if (op2 instanceof UserFuncExpression) {
-                            userfunc = (UserFuncExpression) op2; ///// DO RECURSIVELY
-                        }
-                    }
-                }
-            }
-
-            LogicalRelationalOperator foreach1 = new LOForEach(innerPlan); //how to ensure this takes tuples only?
+            LogicalRelationalOperator foreach1 = new LOForEach(innerPlan);
             subPlan.add(foreach1);
             currentPlan.connect(foreach, foreach1);
             currentPlan.connect(foreach1, userfunc);
 
-            LogicalRelationalOperator foreach2 = new LOForEach(innerPlan); //how to ensure this takes tuples only?
+            LogicalRelationalOperator foreach2 = new LOForEach(innerPlan);
             subPlan.add(foreach2);
             // get the first sink from foreach --> BinCond
             Operator expOp = sinks1.get(0);
             currentPlan.connect(foreach, foreach2);
             currentPlan.connect(foreach2, expOp);
-
-            // when subPlan when currentPlan?
 
         }
 
