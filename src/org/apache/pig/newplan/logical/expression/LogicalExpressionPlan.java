@@ -33,7 +33,7 @@ import org.apache.pig.newplan.logical.optimizer.LogicalPlanPrinter;
  * A plan containing LogicalExpressionOperators.
  */
 public class LogicalExpressionPlan extends BaseOperatorPlan {
-    
+
     @Override
     public boolean isEqual(OperatorPlan other) throws FrontendException {
         if (other != null && other instanceof LogicalExpressionPlan) {
@@ -44,14 +44,14 @@ public class LogicalExpressionPlan extends BaseOperatorPlan {
             if (roots.size() > 1 || otherRoots.size() > 1) {
                 throw new FrontendException("Found LogicalExpressionPlan with more than one root.  Unexpected.", 2224);
             }
-            return roots.get(0).isEqual(otherRoots.get(0));            
+            return roots.get(0).isEqual(otherRoots.get(0));
         } else {
             return false;
         }
     }
-    
+
     @Override
-    public void explain(PrintStream ps, String format, boolean verbose) 
+    public void explain(PrintStream ps, String format, boolean verbose)
     throws FrontendException {
         ps.println("#-----------------------------------------------");
         ps.println("# New Logical Expression Plan:");
@@ -60,23 +60,23 @@ public class LogicalExpressionPlan extends BaseOperatorPlan {
         LogicalPlanPrinter npp = new LogicalPlanPrinter(this, ps);
         npp.visit();
     }
-    
+
     /**
      * Merge all nodes in lgExpPlan, keep the connections
      * @param lgExpPlan plan to merge
      * @return sources of the merged plan
      */
     public List<Operator> merge(LogicalExpressionPlan lgExpPlan) {
-        
+
         List<Operator> sources = lgExpPlan.getSources();
-        
+
         Iterator<Operator> iter = lgExpPlan.getOperators();
         while (iter.hasNext()) {
             LogicalExpression op = (LogicalExpression)iter.next();
             op.setPlan(this);
             add(op);
         }
-        
+
         iter = lgExpPlan.getOperators();
         while (iter.hasNext()) {
             LogicalExpression startOp = (LogicalExpression)iter.next();
@@ -87,7 +87,7 @@ public class LogicalExpressionPlan extends BaseOperatorPlan {
                 }
             }
         }
-        
+
         return sources;
     }
 
@@ -97,6 +97,22 @@ public class LogicalExpressionPlan extends BaseOperatorPlan {
         LogicalExpression newRoot = root.deepCopy( result );
         result.add( newRoot );
         return result;
+    }
+
+    @Override
+    public int hashCode() {
+        int hash = 31;
+        return hash + this.size();
+    }
+
+    @Override
+    public boolean equals(Object arg0) {
+        try {
+            return this.isEqual((LogicalExpressionPlan) arg0);
+        }
+        catch (FrontendException e) {
+            return false;
+        }
     }
 
 }

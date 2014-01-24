@@ -102,17 +102,14 @@ public class NestedForEachUserFunc extends Rule {
                         if (userFuncMap == null) {
                             userFuncMap = new HashMap<LogicalExpressionPlan, Integer>();
                         }
-                        mapIter = userFuncMap.entrySet().iterator();
-                        while (mapIter.hasNext()) {
-                            if (mapIter.next().getKey().isEqual(userFuncPlan)) {
-                                int occ = userFuncMap.get(userFuncPlan);
-                                occ++;
-                                continue;
-                            }
+                        Integer occur = userFuncMap.get(userFuncPlan);
+                        if (occur != null) {
+                            occur++;
+                            userFuncMap.put(userFuncPlan, occur);
+                            continue;
                         }
                         userFuncMap.put(userFuncPlan, 1);
                         userFuncPlan = null;
-
                     }
                 }
             }
@@ -135,30 +132,25 @@ public class NestedForEachUserFunc extends Rule {
                     }
                 }
                 visited.add(uid);
+                if (!top && userFuncPlan != null) {
+                    userFuncPlan.add(exp);
+                    userFuncPlan.connect(((LogicalExpressionPlan) exp.getPlan()).getPredecessors(exp).get(0), exp);
+                }
             }
             else if (exp instanceof ProjectExpression) {
                 if (!projectedColumns.contains(exp.getFieldSchema().uid)) {
-                    // valid column among initial projections
-                    // and not from internal nested block
+                    // valid column among initial projections and not from internal nested block
                     return false;
                 }
-            }
-            if (!top && userFuncPlan != null) {
-                userFuncPlan.add(exp);
-                userFuncPlan.connect(((LogicalExpressionPlan)exp.getPlan()).getPredecessors(exp).get(0), exp);
+                if (!top && userFuncPlan != null) {
+                    ProjectExpression pex = (ProjectExpression) exp;
+                    pex.setInputNum(0);
+                    userFuncPlan.add(pex);
+                    userFuncPlan.connect(((LogicalExpressionPlan)pex.getPlan()).getPredecessors(pex).get(0), pex);
+                }
             }
             return true;
         }
-
-        /*private LogicalExpressionPlan getToPlan(Operator op) {
-            if (op == dupe) {
-                return (LogicalExpressionPlan) op.getPlan();
-            }
-            else {
-                LogicalExpressionPlan lep = (LogicalExpressionPlan)op.getPlan();
-                return getToPlan(((LogicalExpressionPlan)op.getPlan()).getPredecessors(op).get(0));
-            }
-        }*/
 
         @Override
         public void transform(OperatorPlan matched) throws FrontendException {
