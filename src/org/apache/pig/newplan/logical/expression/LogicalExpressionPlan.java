@@ -50,6 +50,21 @@ public class LogicalExpressionPlan extends BaseOperatorPlan {
         }
     }
 
+    public boolean isLogicallyEqual(OperatorPlan other) throws FrontendException {
+        if (other != null && other instanceof LogicalExpressionPlan) {
+            LogicalExpressionPlan otherPlan = (LogicalExpressionPlan)other;
+            List<Operator> roots = getSources();
+            List<Operator> otherRoots = otherPlan.getSources();
+            if (roots.size() == 0 && otherRoots.size() == 0) return true;
+            if (roots.size() > 1 || otherRoots.size() > 1) {
+                throw new FrontendException("Found LogicalExpressionPlan with more than one root.  Unexpected.", 2224);
+            }
+            return roots.get(0).isLogicallyEqual(otherRoots.get(0));
+        } else {
+            return false;
+        }
+    }
+
     @Override
     public void explain(PrintStream ps, String format, boolean verbose)
     throws FrontendException {
@@ -108,7 +123,7 @@ public class LogicalExpressionPlan extends BaseOperatorPlan {
     @Override
     public boolean equals(Object arg0) {
         try {
-            return this.isEqual((LogicalExpressionPlan) arg0);
+            return this.isLogicallyEqual((LogicalExpressionPlan) arg0);
         }
         catch (FrontendException e) {
             return false;

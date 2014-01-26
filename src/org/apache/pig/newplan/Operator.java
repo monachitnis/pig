@@ -26,7 +26,7 @@ import org.apache.pig.parser.SourceLocation;
 
 public abstract class Operator {
     protected SourceLocation location; // The location of the operator in the original pig script.
-    
+
     protected String name;
     protected OperatorPlan plan; // plan that contains this operator
     protected Map<String, Object> annotations;
@@ -42,22 +42,22 @@ public abstract class Operator {
     /**
      * Accept a visitor at this node in the graph.
      * @param v Visitor to accept.
-     * @throws FrontendException 
+     * @throws FrontendException
      */
     public abstract void accept(PlanVisitor v) throws FrontendException;
 
     public String getName() {
         return name;
     }
-    
+
     public SourceLocation getLocation() {
         return location;
     }
-    
+
     public void setLocation(SourceLocation loc) {
         location = loc;
     }
-    
+
     /**
      * Get the plan associated with this operator.
      * @return plan
@@ -65,7 +65,7 @@ public abstract class Operator {
     public OperatorPlan getPlan() {
         return plan;
     }
-    
+
     /**
      * Add an annotation to a node in the plan.
      * @param key string name of this annotation
@@ -74,7 +74,7 @@ public abstract class Operator {
     public void annotate(String key, Object val) {
         annotations.put(key, val);
     }
-    
+
     /**
      * Look to see if a node is annotated.
      * @param key string name of annotation to look for
@@ -93,17 +93,21 @@ public abstract class Operator {
     public Object removeAnnotation(String key) {
         return annotations.remove(key);
     }
-    
+
     public void setPlan(OperatorPlan p) {
         plan = p;
     }
-    
+
     /**
      * This is like a shallow equals comparison.
-     * It returns true if two operators have equivalent properties even if they are 
+     * It returns true if two operators have equivalent properties even if they are
      * different objects. Here properties mean equivalent plan and equivalent name.
      * @param operator
      * @return true if two object have equivalent properties, else false
      */
     public abstract boolean isEqual(Operator operator) throws FrontendException;
+
+    public boolean isLogicallyEqual(Operator operator) throws FrontendException {
+        return false;
+    }
 }

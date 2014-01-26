@@ -10,7 +10,6 @@ import java.util.Map.Entry;
 import java.util.Set;
 
 import org.apache.pig.impl.logicalLayer.FrontendException;
-import org.apache.pig.impl.util.Pair;
 import org.apache.pig.newplan.Operator;
 import org.apache.pig.newplan.OperatorPlan;
 import org.apache.pig.newplan.OperatorSubPlan;
@@ -52,9 +51,7 @@ public class NestedForEachUserFunc extends Rule {
     public class NestedForEachUserFuncTransformer extends Transformer {
 
         LOForEach foreach = null;
-        Set<Pair<Pair<Integer, Integer>, UserFuncExpression>> userFuncSet;
         Map<LogicalExpressionPlan, Integer> userFuncMap;
-        Iterator<Pair<Pair<Integer, Integer>, UserFuncExpression>> setIter;
         Iterator<Entry<LogicalExpressionPlan, Integer>> mapIter;
         Set<Long> projectedColumns;
         OperatorSubPlan subPlan = null;
@@ -87,13 +84,10 @@ public class NestedForEachUserFunc extends Rule {
                 }
             }
 
-            // traverse and record userfunc instances and count
-            // if (nested) {
-            LOGenerate genOp = (LOGenerate) foreach.getInnerPlan().getSinks().get(0);
-            List<LogicalExpressionPlan> generatePlan = genOp.getOutputPlans();
-            Iterator<LogicalExpressionPlan> genIter = generatePlan.iterator();
-            while (genIter.hasNext()) {
-                Iterator<Operator> genOps = genIter.next().getOperators();
+            // traverse and record userfunc plans and count
+            LOGenerate gen = (LOGenerate) foreach.getInnerPlan().getSinks().get(0);
+            for (LogicalExpressionPlan genPlan : gen.getOutputPlans()) {
+                Iterator<Operator> genOps = genPlan.getOperators();
                 Set<Long> visited = new HashSet<Long>();
                 while (genOps.hasNext()) {
                     Operator expOp = genOps.next();
@@ -104,11 +98,12 @@ public class NestedForEachUserFunc extends Rule {
                         }
                         Integer occur = userFuncMap.get(userFuncPlan);
                         if (occur != null) {
-                            occur++;
-                            userFuncMap.put(userFuncPlan, occur);
-                            continue;
+                            userFuncMap.put(userFuncPlan, ++occur);
+                            ret = true;
                         }
-                        userFuncMap.put(userFuncPlan, 1);
+                        else {
+                            userFuncMap.put(userFuncPlan, 1);
+                        }
                         userFuncPlan = null;
                     }
                 }
@@ -116,37 +111,42 @@ public class NestedForEachUserFunc extends Rule {
             return ret;
         }
 
-        private boolean checkNestedUserFunc(LogicalExpression exp, Set visited) throws FrontendException {
+        // recursive method
+        private boolean checkNestedUserFunc(LogicalExpression exp, Set<Long> visited) throws FrontendException {
             boolean top = false;
             long uid = exp.getFieldSchema().uid;
-            if (exp instanceof UserFuncExpression && !visited.contains(uid)) {
-                if (userFuncPlan == null) {
-                    userFuncPlan = new LogicalExpressionPlan();
-                    userFuncPlan.add((UserFuncExpression)exp);
-                    top = true;  //top-level
-                }
-                List<LogicalExpression> userFuncOperands = ((UserFuncExpression) exp).getArguments();
-                for (LogicalExpression ufo : userFuncOperands) {
-                    if(!checkNestedUserFunc(ufo, visited)) {
-                        return false;
-                    }
-                }
-                visited.add(uid);
-                if (!top && userFuncPlan != null) {
-                    userFuncPlan.add(exp);
-                    userFuncPlan.connect(((LogicalExpressionPlan) exp.getPlan()).getPredecessors(exp).get(0), exp);
-                }
-            }
-            else if (exp instanceof ProjectExpression) {
+            if (exp instanceof ProjectExpression) {
                 if (!projectedColumns.contains(exp.getFieldSchema().uid)) {
                     // valid column among initial projections and not from internal nested block
                     return false;
                 }
                 if (!top && userFuncPlan != null) {
                     ProjectExpression pex = (ProjectExpression) exp;
-                    pex.setInputNum(0);
+                    //pex.setInputNum(0); //for equal comparison
+                    //pex.setStartAlias(exp.toName()); // alias not appearing
                     userFuncPlan.add(pex);
                     userFuncPlan.connect(((LogicalExpressionPlan)pex.getPlan()).getPredecessors(pex).get(0), pex);
+                }
+            }
+            else {
+                if (exp instanceof UserFuncExpression && !visited.contains(uid)) {
+                    if (userFuncPlan == null) {
+                        userFuncPlan = new LogicalExpressionPlan();
+                        userFuncPlan.add((UserFuncExpression) exp);
+                        top = true; // top-level
+                    }
+                    List<LogicalExpression> userFuncOperands = ((UserFuncExpression) exp).getArguments();
+                    for (LogicalExpression ufo : userFuncOperands) {
+                        if (!checkNestedUserFunc(ufo, visited)) {
+                            return false;
+                        }
+                    }
+                    visited.add(uid);
+
+                }
+                if (!top && userFuncPlan != null) {
+                    userFuncPlan.add(exp);
+                    userFuncPlan.connect(((LogicalExpressionPlan) exp.getPlan()).getPredecessors(exp).get(0), exp);
                 }
             }
             return true;
@@ -156,75 +156,81 @@ public class NestedForEachUserFunc extends Rule {
         public void transform(OperatorPlan matched) throws FrontendException {
 
             LogicalPlan innerPlan = foreach.getInnerPlan();
-            // for splitting into two foreach stages, create a new foreach
-            // operator
+            // for splitting into two foreach stages, create a new foreach operator
             LOForEach newForeach = new LOForEach(innerPlan);
             LogicalPlan newInnerPlan = new LogicalPlan();
             newForeach.setInnerPlan(newInnerPlan);
             newForeach.setAlias(foreach.getAlias());
             List<LogicalExpressionPlan> exps = new ArrayList<LogicalExpressionPlan>();
-            LOGenerate newGenerate = new LOGenerate(newInnerPlan, exps, new boolean[1]); // TODO
-                                                                                         // index?
+            LOGenerate newGenerate = new LOGenerate(newInnerPlan, exps, new boolean[1]);
             newInnerPlan.add(newGenerate);
-            LOInnerLoad newInnerLoad = new LOInnerLoad(newInnerPlan, foreach, 0); // <--
-            newInnerPlan.add(newInnerLoad);
-            newInnerPlan.connect(newInnerLoad, newGenerate);
-            System.out.println(newInnerPlan);
+
+            subPlan = new OperatorSubPlan(currentPlan);
+            subPlan.add(newForeach);
+            subPlan.add(newGenerate);
+            currentPlan.connect(newForeach, newGenerate);
+            System.out.println(currentPlan);
 
             // populate the project expressions under new foreach -- generate
             // iterate through userfuncset
-            setIter = userFuncSet.iterator();
-            while (setIter.hasNext()) {
-                Pair<Pair<Integer, Integer>, UserFuncExpression> item = setIter.next();
-                if (item.first.second > 1) {
-                    ProjectExpression prx = new ProjectExpression(newGenerate.getPlan(), 0, item.first.first,
-                            newGenerate);
-                    // can be multiple projects
-                    LogicalExpressionPlan lexPlan = new LogicalExpressionPlan();
-                    lexPlan.add(item.second);
-                    // lexPlan.add(prx);
-                    lexPlan.connect(item.second, prx);
-                    exps.add(lexPlan);
-                }
-            }
+            mapIter = userFuncMap.entrySet().iterator();
+            while (mapIter.hasNext()) {
+                Entry<LogicalExpressionPlan, Integer> e = mapIter.next();
+                if (e.getValue() > 1) {
+                    LogicalExpressionPlan toMove = e.getKey();
+                    exps.add(toMove);
+                    LOInnerLoad newInnerLoad = new LOInnerLoad(toMove, foreach, 0);
+                    newInnerPlan.add(newInnerLoad);
+                    newInnerPlan.connect(newInnerLoad, newGenerate);
 
-            // disconnect UserFunc from BinCond
-            LOGenerate existingGen = (LOGenerate) innerPlan.getSinks().get(0);
-            List<LogicalExpressionPlan> generatePlan = existingGen.getOutputPlans();
-            Iterator<LogicalExpressionPlan> genIter = generatePlan.iterator();
-            while (genIter.hasNext()) {
-                LogicalExpressionPlan genPlan = genIter.next();
-                Iterator<Operator> opIter = genPlan.getOperators();
-                while (opIter.hasNext()) {
-                    Operator expOp = opIter.next();
-                    if (expOp instanceof UserFuncExpression) {
-                        Operator column = expOp.getPlan().getSuccessors(expOp).get(0);
-                        int col = (int) ((ProjectExpression) column).getFieldSchema().uid;
-                        setIter = userFuncSet.iterator();
-                        while (setIter.hasNext()) {
-                            Pair<Pair<Integer, Integer>, UserFuncExpression> item = setIter.next();
-                            if (item.second.getName() == expOp.getName() && item.first.first == col) {
-                                genPlan.disconnect(genPlan.getPredecessors(expOp).get(0), expOp);
-                                currentPlan.remove(expOp);
+                    Operator userFunc = toMove.getOperators().next();
+
+                    // disconnect duplicate plans
+                    LOGenerate gen = (LOGenerate) innerPlan.getSinks().get(0);
+                    for (LogicalExpressionPlan genPlan : gen.getOutputPlans()) {
+                        Iterator<Operator> genOps = genPlan.getOperators();
+                        while (genOps.hasNext()) {
+                            Operator genOp = genOps.next();
+                            Operator parent = genOp.getPlan().getPredecessors(userFunc).get(0);
+                            if (genOp instanceof UserFuncExpression
+                                    && toMove.getSinks().get(0) == parent.getPlan().getSinks().get(0)) {
+                                genPlan.disconnect(parent, genOp);
+                                Iterator<Operator> rem = genOp.getPlan().getOperators();
+                                rem.next(); // skip the genOp itself
+                                while (rem.hasNext()) {
+                                    Operator toRem = rem.next();
+                                    genPlan.disconnect(genOp, toRem);
+                                    genPlan.remove(toRem); //TODO throws 'still connected' error
+                                }
+                                genPlan.remove(genOp);
                             }
-                            break;
                         }
                     }
                 }
             }
 
-            /*
-             * //disconnect older unoptimized innerLoads for (Operator oldLoad :
-             * innerPlan.getSources()) { innerPlan.disconnect(existingGen,
-             * oldLoad); //currentPlan.remove? disconnect? }
-             */
+            // Adjust attachedOp
+            for (LogicalExpressionPlan p : newGenerate.getOutputPlans()) {
+                Iterator<Operator> iter = p.getOperators();
+                while (iter.hasNext()) {
+                    Operator op = iter.next();
+                    if (op instanceof ProjectExpression) {
+                        ((ProjectExpression)op).setAttachedRelationalOp(newGenerate);
+                    }
+                }
+            }
+
+            Iterator<Operator> iter = newForeach.getInnerPlan().getOperators();
+            while (iter.hasNext()) {
+                Operator op = iter.next();
+                if (op instanceof LOInnerLoad) {
+                    ((LOInnerLoad)op).getProjection().setAttachedRelationalOp(newForeach);
+                }
+            }
 
             // add new foreach as predecessor to existing foreach
             currentPlan.insertBetween(foreach, newForeach, currentPlan.getSuccessors(foreach).get(0));
-            subPlan = new OperatorSubPlan(currentPlan);
-            subPlan.add(newForeach);
-            subPlan.add(newGenerate);
-            subPlan.add(newInnerLoad);
+            //TODO checking new foreach supplies proper input num to successor BinCond
 
         }
 

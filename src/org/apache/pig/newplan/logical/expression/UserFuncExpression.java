@@ -23,9 +23,6 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import org.apache.pig.EvalFunc;
 import org.apache.pig.FuncSpec;
 import org.apache.pig.builtin.InvokerGenerator;
@@ -84,13 +81,13 @@ public class UserFuncExpression extends LogicalExpression {
         this( plan, funcSpec, args );
         this.viaDefine = viaDefine;
     }
-    
+
     private boolean lazilyInitializeInvokerFunction = false;
     private List<LogicalExpression> saveArgsForLater = null;
     private boolean invokerIsStatic = false;
     private String funcName = null;
     private String packageName = null;
-    
+
     public UserFuncExpression(OperatorPlan plan, FuncSpec funcSpec, List<LogicalExpression> args, boolean viaDefine, boolean lazilyInitializeInvokerFunction, boolean invokerIsStatic, String packageName, String funcName) {
         this( plan, funcSpec, args, viaDefine );
         this.saveArgsForLater = args;
@@ -151,6 +148,43 @@ public class UserFuncExpression extends LogicalExpression {
         }
     }
 
+    @Override
+    public boolean isLogicallyEqual(Operator other) throws FrontendException {
+        if (other instanceof UserFuncExpression) {
+            UserFuncExpression exp = (UserFuncExpression) other;
+            if (!mFuncSpec.equals(exp.mFuncSpec))
+                return false;
+
+            List<Operator> mySuccs = getPlan().getSuccessors(this);
+            List<Operator> theirSuccs = other.getPlan().getSuccessors(other);
+            if (mySuccs == null || theirSuccs == null) {
+                if (mySuccs == null && theirSuccs == null) {
+                    return true;
+                }
+                else {
+                    // only one of the udfs has null successors
+                    return false;
+                }
+            }
+            if (mySuccs.size() != theirSuccs.size())
+                return false;
+            for (int i = 0; i < mySuccs.size(); i++) {
+                if (mySuccs.get(i) instanceof ProjectExpression || mySuccs.get(i) instanceof UserFuncExpression) {
+                    if (!mySuccs.get(i).isLogicallyEqual(theirSuccs.get(i)))
+                        return false;
+                }
+                else {
+                    if (!mySuccs.get(i).isEqual(theirSuccs.get(i)))
+                        return false;
+                }
+            }
+            return true;
+        }
+        else {
+            return false;
+        }
+    }
+
     public boolean isDeterministic() throws FrontendException{
         Class<?> udfClass;
         try {
@@ -192,7 +226,7 @@ public class UserFuncExpression extends LogicalExpression {
         mFuncSpec = funcSpec;
         ef = (EvalFunc<?>) PigContext.instantiateFuncFromSpec(mFuncSpec);
     }
-    
+
     @Override
     public LogicalSchema.LogicalFieldSchema getFieldSchema() throws FrontendException {
         if (fieldSchema!=null)

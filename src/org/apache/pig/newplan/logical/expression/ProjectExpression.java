@@ -52,7 +52,7 @@ public class ProjectExpression extends ColumnExpression {
     private int col; // The column in the input which the project references.
                      // Count is zero based.
     private String alias; // The alias of the projected field.
-    
+
     /**
      * In Foreach inner plan, a projection can be made on a relational operator, which may get reused.
      * However, the expression needs to be sticky to the operator on which the expression is projected.
@@ -247,7 +247,7 @@ public class ProjectExpression extends ColumnExpression {
     public String getColAlias() {
         return alias;
     }
-    
+
     public Operator getProjectedOperator() {
     	return this.projectedOperator;
     }
@@ -431,6 +431,23 @@ public class ProjectExpression extends ColumnExpression {
             if (po.input != input || po.col != col)
                 return false;
 
+            Operator mySucc = getPlan().getSuccessors(this)!=null?
+                    getPlan().getSuccessors(this).get(0):null;
+            Operator theirSucc = other.getPlan().getSuccessors(other)!=null?
+                    other.getPlan().getSuccessors(other).get(0):null;
+            if (mySucc!=null && theirSucc!=null)
+                return mySucc.isEqual(theirSucc);
+            if (mySucc==null && theirSucc==null)
+                return true;
+            return false;
+        } else {
+            return false;
+        }
+    }
+
+    @Override
+    public boolean isLogicallyEqual(Operator other) throws FrontendException {
+        if (other != null) {
             Operator mySucc = getPlan().getSuccessors(this)!=null?
                     getPlan().getSuccessors(this).get(0):null;
             Operator theirSucc = other.getPlan().getSuccessors(other)!=null?
