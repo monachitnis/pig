@@ -26,7 +26,15 @@ PIG-3485: Remove CastUtils.bytesToMap(byte[] b) method from LoadCaster interface
 
 PIG-3419: Pluggable Execution Engine (achalsoni81 via cheolsoo)
 
+PIG-2207: Support custom counters for aggregating warnings from different udfs (aniket486)
+
 IMPROVEMENTS
+
+PIG-3654: Add class cache to PigContext (tmwoodruff via daijy)
+
+PIG-3463: Pig should use hadoop local mode for small jobs (aniket486)
+
+PIG-3573: Provide StoreFunc and LoadFunc for Accumulo (elserj via daijy)
 
 PIG-3653: Add support for pre-deployed jars (tmwoodruff via daijy)
 
@@ -65,6 +73,14 @@ PIG-3484: Make the size of pig.script property configurable (cheolsoo)
 OPTIMIZATIONS
  
 BUG FIXES
+
+PIG-3677: ConfigurationUtil.getLocalFSProperties can return an inconsistent property set (rohini)
+
+PIG-3511: Security: Pig temporary directories might have world readable permissions (rohini)
+
+PIG-3664: Piggy Bank XPath UDF can't be called (nezihyigitbasi via daijy)
+
+PIG-3662: Static loadcaster in BinStorage can cause exception (lbendig via rohini)
 
 PIG-3657: New partition filter extractor fails with NPE (cheolsoo)
 
