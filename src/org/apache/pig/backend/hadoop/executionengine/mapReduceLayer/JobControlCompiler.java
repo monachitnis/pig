@@ -110,6 +110,7 @@ import org.apache.pig.impl.util.ObjectSerializer;
 import org.apache.pig.impl.util.Pair;
 import org.apache.pig.impl.util.UDFContext;
 import org.apache.pig.impl.util.Utils;
+import org.apache.pig.tools.pigstats.mapreduce.MRPigStatsUtil;
 import org.apache.pig.tools.pigstats.mapreduce.MRScriptState;
 
 /**
@@ -375,7 +376,24 @@ public class JobControlCompiler{
 
         try {
             counters = HadoopShims.getCounters(job);
-            groupCounters = counters.getGroup(getGroupName(counters.getGroupNames()));
+
+            String groupName = getGroupName(counters.getGroupNames());
+            // In case that the counter group was not find, we need to find
+            // out why. Only acceptable state is that the relation has been
+            // empty.
+            if (groupName == null) {
+                Counter outputRecords =
+                    counters.getGroup(MRPigStatsUtil.TASK_COUNTER_GROUP)
+                    .getCounterForName(MRPigStatsUtil.MAP_OUTPUT_RECORDS);
+
+                if(outputRecords.getCounter() == 0) {
+                    globalCounters.put(operationID, new ArrayList<Pair<String, Long>>());
+                    return;
+                } else {
+                  throw new RuntimeException("Did not found RANK counter group for operationId: " + operationID);
+                }
+            }
+            groupCounters = counters.getGroup(groupName);
 
             Iterator<Counter> it = groupCounters.iterator();
             HashMap<Integer,Long> counterList = new HashMap<Integer, Long>();
@@ -667,27 +685,13 @@ public class JobControlCompiler{
                     if(!pigContext.inIllustrator)
                         mro.reducePlan.remove(st);
                 }
-
-                // set out filespecs
-                String outputPathString = st.getSFile().getFileName();
-                if (!outputPathString.contains("://") || outputPathString.startsWith("hdfs://")) {
-                    conf.set("pig.streaming.log.dir",
-                            new Path(outputPathString, LOG_DIR).toString());
-                } else {
-                    String tmpLocationStr =  FileLocalizer
-                            .getTemporaryPath(pigContext).toString();
-                    tmpLocation = new Path(tmpLocationStr);
-                    conf.set("pig.streaming.log.dir",
-                            new Path(tmpLocation, LOG_DIR).toString());
-                }
-                conf.set("pig.streaming.task.output.dir", outputPathString);
+                
+                MapRedUtil.setupStreamingDirsConfSingle(st, pigContext, conf);
             }
             else if (mapStores.size() + reduceStores.size() > 0) { // multi store case
                 log.info("Setting up multi store job");
-                String tmpLocationStr =  FileLocalizer
-                        .getTemporaryPath(pigContext).toString();
-                tmpLocation = new Path(tmpLocationStr);
-
+                MapRedUtil.setupStreamingDirsConfMulti(pigContext, conf);
+                
                 nwJob.setOutputFormatClass(PigOutputFormat.class);
 
                 boolean disableCounter = conf.getBoolean("pig.disable.counter", false);
@@ -700,10 +704,6 @@ public class JobControlCompiler{
                     sto.setMultiStore(true);
                     sto.setIndex(idx++);
                 }
-
-                conf.set("pig.streaming.log.dir",
-                        new Path(tmpLocation, LOG_DIR).toString());
-                conf.set("pig.streaming.task.output.dir", tmpLocation.toString());
             }
 
             // store map key type
