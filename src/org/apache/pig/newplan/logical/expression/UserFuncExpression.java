@@ -148,43 +148,6 @@ public class UserFuncExpression extends LogicalExpression {
         }
     }
 
-    @Override
-    public boolean isLogicallyEqual(Operator other) throws FrontendException {
-        if (other instanceof UserFuncExpression) {
-            UserFuncExpression exp = (UserFuncExpression) other;
-            if (!mFuncSpec.equals(exp.mFuncSpec))
-                return false;
-
-            List<Operator> mySuccs = getPlan().getSuccessors(this);
-            List<Operator> theirSuccs = other.getPlan().getSuccessors(other);
-            if (mySuccs == null || theirSuccs == null) {
-                if (mySuccs == null && theirSuccs == null) {
-                    return true;
-                }
-                else {
-                    // only one of the udfs has null successors
-                    return false;
-                }
-            }
-            if (mySuccs.size() != theirSuccs.size())
-                return false;
-            for (int i = 0; i < mySuccs.size(); i++) {
-                if (mySuccs.get(i) instanceof ProjectExpression || mySuccs.get(i) instanceof UserFuncExpression) {
-                    if (!mySuccs.get(i).isLogicallyEqual(theirSuccs.get(i)))
-                        return false;
-                }
-                else {
-                    if (!mySuccs.get(i).isEqual(theirSuccs.get(i)))
-                        return false;
-                }
-            }
-            return true;
-        }
-        else {
-            return false;
-        }
-    }
-
     public boolean isDeterministic() throws FrontendException{
         Class<?> udfClass;
         try {

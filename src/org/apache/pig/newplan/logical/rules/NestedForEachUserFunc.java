@@ -86,26 +86,61 @@ public class NestedForEachUserFunc extends Rule {
 
             // traverse and record userfunc plans and count
             LOGenerate gen = (LOGenerate) foreach.getInnerPlan().getSinks().get(0);
-            for (LogicalExpressionPlan genPlan : gen.getOutputPlans()) {
-                Iterator<Operator> genOps = genPlan.getOperators();
+            LogicalExpressionPlan genPlanOrig = null;
+            int indexOrig = 0;
+            List<LogicalExpressionPlan> genPlans = gen.getOutputPlans();
+            for (int index = 0 ; index < genPlans.size() ; index++) {
+                Iterator<Operator> genOps = genPlans.get(index).getOperators();
                 Set<Long> visited = new HashSet<Long>();
                 while (genOps.hasNext()) {
-                    Operator expOp = genOps.next();
+                    Operator genOp = genOps.next();
                     // check for nested userfunc and its operands
-                    if (checkNestedUserFunc((LogicalExpression) expOp, visited) && userFuncPlan != null) {
+                    if (checkNestedUserFunc((LogicalExpression) genOp, visited) && userFuncPlan != null) {
                         if (userFuncMap == null) {
                             userFuncMap = new HashMap<LogicalExpressionPlan, Integer>();
                         }
-                        Integer occur = userFuncMap.get(userFuncPlan);
-                        if (occur != null) {
-                            userFuncMap.put(userFuncPlan, ++occur);
-                            ret = true;
+                        int occurrence = 0;
+                        mapIter = userFuncMap.entrySet().iterator();
+                        while (mapIter.hasNext()) {
+                            Entry<LogicalExpressionPlan, Integer> duplicate = mapIter.next();
+                            if (isLogicallyEqual(duplicate.getKey(), userFuncPlan)) {
+                                UserFuncExpression userFunc = (UserFuncExpression) duplicate.getKey().getOperators().next();
+                                ProjectExpression col = (ProjectExpression) userFunc.getPlan().getSinks().get(0); //TODO multiple sinks i.e. operands
+
+                                occurrence = duplicate.getValue();
+                                if (occurrence == 1) { //first time match for this userFuncPlan
+                                    Operator parent = genPlanOrig.getPredecessors(userFunc).get(0);
+                                    disconnectPlan(genPlanOrig, duplicate.getKey());
+
+                                    // add new project
+                                    ProjectExpression pe = new ProjectExpression(genPlanOrig, indexOrig,
+                                            col.getColAlias(), null, gen);
+                                    pe.setColumnNumberFromAlias();
+                                    genPlanOrig.connect(parent, pe);
+                                }
+                                duplicate.setValue(++occurrence);
+                                ret = true;
+
+                                UserFuncExpression userFuncOp = (UserFuncExpression) userFuncPlan.getOperators().next();
+                                Operator parent = genPlans.get(index).getPredecessors(userFuncOp).get(0);
+                                col = (ProjectExpression) userFuncPlan.getSinks().get(0); //TODO multiple sinks i.e. operands
+
+                                disconnectPlan(genPlans.get(index), userFuncPlan);
+
+                                // add new project
+                                ProjectExpression pe = new ProjectExpression(genPlans.get(index), index,
+                                        col.getColAlias(), null, gen);
+                                genPlans.get(index).connect(parent, pe);
+                            }
                         }
-                        else {
+                        if (occurrence == 0) {
                             userFuncMap.put(userFuncPlan, 1);
+                            genPlanOrig = genPlans.get(index);
+                            indexOrig = index;
                         }
                         userFuncPlan = null;
                     }
+                    break;
                 }
             }
             return ret;
@@ -122,8 +157,6 @@ public class NestedForEachUserFunc extends Rule {
                 }
                 if (!top && userFuncPlan != null) {
                     ProjectExpression pex = (ProjectExpression) exp;
-                    //pex.setInputNum(0); //for equal comparison
-                    //pex.setStartAlias(exp.toName()); // alias not appearing
                     userFuncPlan.add(pex);
                     userFuncPlan.connect(((LogicalExpressionPlan)pex.getPlan()).getPredecessors(pex).get(0), pex);
                 }
@@ -152,6 +185,82 @@ public class NestedForEachUserFunc extends Rule {
             return true;
         }
 
+        // disconnect userFuncPlan from original Generate
+        private void disconnectPlan(OperatorPlan outerPlan, LogicalExpressionPlan toDisc) throws FrontendException {
+            Operator userFuncOp = toDisc.getOperators().next();
+            Operator parent = outerPlan.getPredecessors(userFuncOp).get(0);
+            outerPlan.disconnect(parent, userFuncOp);
+            Iterator<Operator> rem = toDisc.getOperators();
+            rem.next(); // skip the userfunc itself
+            while (rem.hasNext()) {
+                Operator toRem = rem.next();
+                outerPlan.disconnect(outerPlan.getPredecessors(toRem).get(0), toRem);
+                outerPlan.remove(toRem);
+            }
+            outerPlan.remove(userFuncOp);
+        }
+
+        private boolean isLogicallyEqual(LogicalExpressionPlan l1, LogicalExpressionPlan l2) throws FrontendException {
+            List<Operator> roots = l1.getSources();
+            List<Operator> otherRoots = l2.getSources();
+            if (roots.size() == 0 && otherRoots.size() == 0)
+                return true;
+            if (roots.size() > 1 || otherRoots.size() > 1) {
+                throw new FrontendException("Found LogicalExpressionPlan with more than one root.  Unexpected.", 2224);
+            }
+            return isLogicallyEqual(roots.get(0), otherRoots.get(0));
+        }
+
+        private boolean isLogicallyEqual(Operator o1, Operator o2) throws FrontendException {
+            if (o1 instanceof UserFuncExpression && o2 instanceof UserFuncExpression) {
+                UserFuncExpression u1 = (UserFuncExpression) o1;
+                UserFuncExpression u2 = (UserFuncExpression) o2;
+                if (!u1.getFuncSpec().equals(u2.getFuncSpec()))
+                    return false;
+
+                List<Operator> mySuccs = u1.getPlan().getSuccessors(u1);
+                List<Operator> theirSuccs = u2.getPlan().getSuccessors(u2);
+                if (mySuccs == null || theirSuccs == null) {
+                    if (mySuccs == null && theirSuccs == null) {
+                        return true;
+                    }
+                    else {
+                        // only one of the udfs has null successors
+                        return false;
+                    }
+                }
+                if (mySuccs.size() != theirSuccs.size())
+                    return false;
+                for (int i = 0; i < mySuccs.size(); i++) {
+                    if (mySuccs.get(i) instanceof ProjectExpression || mySuccs.get(i) instanceof UserFuncExpression) {
+                        if (!isLogicallyEqual(mySuccs.get(i), theirSuccs.get(i)))
+                            return false;
+                    }
+                    else {
+                        if (!mySuccs.get(i).isEqual(theirSuccs.get(i)))
+                            return false;
+                    }
+                }
+                return true;
+            }
+            else {
+                if (o1 instanceof ProjectExpression && o2 instanceof ProjectExpression) {
+                    Operator mySucc = o1.getPlan().getSuccessors(o1) != null
+                            ? o1.getPlan().getSuccessors(o1).get(0)
+                            : null;
+                    Operator theirSucc = o2.getPlan().getSuccessors(o2) != null
+                            ? o2.getPlan().getSuccessors(o2).get(0)
+                            : null;
+                    if (mySucc != null && theirSucc != null)
+                        return mySucc.isEqual(theirSucc);
+                    if (mySucc == null && theirSucc == null)
+                        return true;
+                    return false;
+                }
+            }
+            return false;
+        }
+
         @Override
         public void transform(OperatorPlan matched) throws FrontendException {
 
@@ -164,13 +273,23 @@ public class NestedForEachUserFunc extends Rule {
             List<LogicalExpressionPlan> exps = new ArrayList<LogicalExpressionPlan>();
             LOGenerate newGenerate = new LOGenerate(newInnerPlan, exps, new boolean[1]);
             newInnerPlan.add(newGenerate);
+            LOInnerLoad newInnerLoad = new LOInnerLoad(newInnerPlan, newForeach, 0);
+            newInnerLoad.setSchema(((LOLoad)foreach.getPlan().getSources().get(0)).getSchema());
+            newInnerPlan.add(newInnerLoad);
+            newInnerPlan.connect(newInnerLoad, newGenerate);
 
             subPlan = new OperatorSubPlan(currentPlan);
+            subPlan.add(foreach);
             subPlan.add(newForeach);
             subPlan.add(newGenerate);
+            subPlan.add(newInnerLoad);
             currentPlan.connect(newForeach, newGenerate);
-            System.out.println(currentPlan);
 
+            // add new foreach as predecessor to existing foreach
+            subPlan.add(currentPlan.getPredecessors(foreach).get(0));
+            currentPlan.insertBetween(currentPlan.getPredecessors(foreach).get(0), newForeach, foreach);
+
+            LOGenerate gen = (LOGenerate) innerPlan.getSinks().get(0);
             // populate the project expressions under new foreach -- generate
             // iterate through userfuncset
             mapIter = userFuncMap.entrySet().iterator();
@@ -179,59 +298,27 @@ public class NestedForEachUserFunc extends Rule {
                 if (e.getValue() > 1) {
                     LogicalExpressionPlan toMove = e.getKey();
                     exps.add(toMove);
-                    LOInnerLoad newInnerLoad = new LOInnerLoad(toMove, foreach, 0);
-                    newInnerPlan.add(newInnerLoad);
-                    newInnerPlan.connect(newInnerLoad, newGenerate);
 
-                    Operator userFunc = toMove.getOperators().next();
-
-                    // disconnect duplicate plans
-                    LOGenerate gen = (LOGenerate) innerPlan.getSinks().get(0);
-                    for (LogicalExpressionPlan genPlan : gen.getOutputPlans()) {
-                        Iterator<Operator> genOps = genPlan.getOperators();
-                        while (genOps.hasNext()) {
-                            Operator genOp = genOps.next();
-                            Operator parent = genOp.getPlan().getPredecessors(userFunc).get(0);
-                            if (genOp instanceof UserFuncExpression
-                                    && toMove.getSinks().get(0) == parent.getPlan().getSinks().get(0)) {
-                                genPlan.disconnect(parent, genOp);
-                                Iterator<Operator> rem = genOp.getPlan().getOperators();
-                                rem.next(); // skip the genOp itself
-                                while (rem.hasNext()) {
-                                    Operator toRem = rem.next();
-                                    genPlan.disconnect(genOp, toRem);
-                                    genPlan.remove(toRem); //TODO throws 'still connected' error
-                                }
-                                genPlan.remove(genOp);
-                            }
-                        }
+                    // change innerLoad of generate to load this new column
+                    // this affects project indirectly
+                    for (Operator genSrc : gen.getPlan().getSources()) {
+                        LOInnerLoad innerLoad = (LOInnerLoad) genSrc;
+                        innerLoad.setSchema(newForeach.getSchema());
                     }
                 }
             }
 
-            // Adjust attachedOp
-            for (LogicalExpressionPlan p : newGenerate.getOutputPlans()) {
-                Iterator<Operator> iter = p.getOperators();
-                while (iter.hasNext()) {
-                    Operator op = iter.next();
-                    if (op instanceof ProjectExpression) {
-                        ((ProjectExpression)op).setAttachedRelationalOp(newGenerate);
+            for (OperatorPlan genPlan : gen.getOutputPlans()) {
+                Iterator<Operator> genOps = genPlan.getOperators();
+                while (genOps.hasNext()) {
+                    Operator genOp = genOps.next();
+                    if (genOp instanceof ProjectExpression) {
+                        ProjectExpression projOp = (ProjectExpression) genOp;
+                        projOp.getFieldSchema();
+                        projOp.setAttachedRelationalOp(gen);
                     }
                 }
             }
-
-            Iterator<Operator> iter = newForeach.getInnerPlan().getOperators();
-            while (iter.hasNext()) {
-                Operator op = iter.next();
-                if (op instanceof LOInnerLoad) {
-                    ((LOInnerLoad)op).getProjection().setAttachedRelationalOp(newForeach);
-                }
-            }
-
-            // add new foreach as predecessor to existing foreach
-            currentPlan.insertBetween(foreach, newForeach, currentPlan.getSuccessors(foreach).get(0));
-            //TODO checking new foreach supplies proper input num to successor BinCond
-
         }
 
         @Override

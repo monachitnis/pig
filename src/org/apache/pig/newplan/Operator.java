@@ -107,7 +107,4 @@ public abstract class Operator {
      */
     public abstract boolean isEqual(Operator operator) throws FrontendException;
 
-    public boolean isLogicallyEqual(Operator operator) throws FrontendException {
-        return false;
-    }
 }

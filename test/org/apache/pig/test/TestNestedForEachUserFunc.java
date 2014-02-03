@@ -9,6 +9,8 @@ import org.apache.hadoop.fs.Path;
 import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
 import org.apache.pig.data.Tuple;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 public class TestNestedForEachUserFunc extends junit.framework.TestCase {
@@ -20,13 +22,15 @@ public class TestNestedForEachUserFunc extends junit.framework.TestCase {
     }
 
     @Override
+    @Before
     public void setUp() throws Exception {
         String[] input = {"1\tFrodo\tBaggins\tHobbbit", "2\tSam\tGamgee\tHobbit", "3\tGandalf\tGrey\tWizard"};
-        Util.createInputFile(FileSystem.getLocal(new Configuration()), "my_data", input);
+        //newUtil.createInputFile(FileSystem.getLocal(new Configuration()), "my_data", input);
 
     }
 
     @Override
+    @After
     public void tearDown() throws Exception {
         FileSystem.getLocal(new Configuration()).delete(new Path("my_data"), true);
     }
