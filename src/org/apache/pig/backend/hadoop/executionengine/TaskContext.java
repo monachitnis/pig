@@ -15,27 +15,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.pig.impl.util;
+package org.apache.pig.backend.hadoop.executionengine;
 
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.Path;
-import org.apache.pig.backend.hadoop.executionengine.shims.HadoopShims;
+import org.apache.hadoop.mapreduce.Counter;
 
-public class UriUtil {
-    public static boolean isHDFSFile(String uri){
-        if(uri == null)
-            return false;
-        if (uri.startsWith("/") || uri.startsWith("hdfs:") || uri.startsWith("viewfs:") ||
-                uri.startsWith("hftp:") || uri.startsWith("webhdfs:")) {
-            return true;
-        }
-        return false;
+public abstract class TaskContext<T> {
+    public abstract T get();
+
+    public abstract Counter getCounter(Enum<?> name);
+
+    public abstract Counter getCounter(String group, String name);
+
+    public abstract boolean incrCounter(Enum<?> name, long delta);
+
+    public abstract boolean incrCounter(String group, String name, long delta);
+
+    public void progress() {
     }
 
-    public static boolean isHDFSFileOrLocalOrS3N(String uri, Configuration conf){
-        if(uri == null)
-            return false;
-        return HadoopShims.hasFileSystemImpl(new Path(uri), conf);
+    public float getProgress() {
+        return 0f;
     }
 
+    public void setStatus(String status) {
+    }
 }
