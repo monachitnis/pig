@@ -238,9 +238,14 @@ public final class StorageUtil {
             break;
 
         default: {
-            int errCode = 2108;
-            String msg = "Could not determine data type of field: " + field;
-            throw new ExecException(msg, errCode, PigException.BUG);
+            if (DataType.findType(field) == -1 && field instanceof byte[]) {
+                writeField(out, (byte[]) field, DataType.BYTEARRAY, includeTypeInformation);
+            }
+            else {
+                int errCode = 2108;
+                String msg = "Could not determine data type of field: " + field;
+                throw new ExecException(msg, errCode, PigException.BUG);
+            }
         }
 
         }

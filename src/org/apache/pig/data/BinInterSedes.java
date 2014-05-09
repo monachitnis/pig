@@ -37,7 +37,6 @@ import org.apache.hadoop.io.DataInputBuffer;
 import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.io.WritableComparable;
 import org.apache.hadoop.io.WritableComparator;
-import org.apache.hadoop.mapred.JobConf;
 import org.apache.pig.PigException;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.classification.InterfaceAudience;
@@ -459,6 +458,8 @@ public class BinInterSedes implements InterSedes {
     public void writeDatum(DataOutput out, Object val) throws IOException {
         // Read the data type
         byte type = DataType.findType(val);
+        if (val instanceof byte[])
+            type = DataType.BYTEARRAY;
         writeDatum(out, val, type);
     }
 
@@ -570,8 +571,13 @@ public class BinInterSedes implements InterSedes {
             break;
 
         case DataType.BYTEARRAY: {
-            DataByteArray bytes = (DataByteArray) val;
-            SedesHelper.writeBytes(out, bytes.mData);
+            if (val instanceof DataByteArray) {
+                DataByteArray bytes = (DataByteArray) val;
+                SedesHelper.writeBytes(out, bytes.mData);
+            }
+            else if (val instanceof byte[]) {
+                SedesHelper.writeBytes(out, (byte[])val);
+            }
             break;
 
         }

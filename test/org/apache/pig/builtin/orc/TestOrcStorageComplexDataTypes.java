@@ -43,6 +43,7 @@ import org.apache.hadoop.hive.serde2.objectinspector.StructField;
 import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.ListTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.MapTypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.pig.ExecType;
@@ -53,7 +54,6 @@ import org.apache.pig.backend.executionengine.ExecJob;
 import org.apache.pig.backend.hadoop.datastorage.ConfigurationUtil;
 import org.apache.pig.builtin.mock.Storage.Data;
 import org.apache.pig.data.DataType;
-import org.apache.pig.impl.logicalLayer.schema.Schema;
 import org.apache.pig.impl.logicalLayer.schema.Schema.FieldSchema;
 import org.apache.pig.impl.util.orc.OrcUtils;
 import org.apache.pig.test.Util;
@@ -132,7 +132,7 @@ public class TestOrcStorageComplexDataTypes {
 
         // Test Tuples of Bag containing primitive type
         Data data = resetData(pigServer);
-        data.set("input", "a0:int, a1:bag{tuple(chararray)}", tuple(1, bag(tuple("bag1"))));
+        data.set("input", "a0:int, a1:bag{tuple(chararray)}", tuple(1, bag(tuple("content1, content2"))));
         pigServer.registerQuery("A = load 'input' using mock.Storage() as (a0:int, a1:bag{tuple(chararray)});");
         ExecJob job = pigServer.store("A", OUTPUT1, "OrcStorage");
         Path outputFilePath = new Path(new Path(OUTPUT1), "part-m-00000");
@@ -151,7 +151,7 @@ public class TestOrcStorageComplexDataTypes {
         IntWritable intWritable = (IntWritable) soi.getStructFieldData(row, soi.getAllStructFieldRefs().get(0));
         List bagContents = (List) soi.getStructFieldData(row, soi.getAllStructFieldRefs().get(1));
         assertEquals(intWritable.get(), 1);
-        assertEquals(bagContents.get(0).toString(), "{bag1}");
+        assertEquals(bagContents.get(0).toString(), "{content1, content2}");
 
         // Test Tuples of Map
         data = resetData(pigServer);
@@ -218,34 +218,11 @@ public class TestOrcStorageComplexDataTypes {
         assertEquals(Category.MAP, soi.getAllStructFieldRefs().get(0).getFieldObjectInspector().getCategory());
     }
 
-    /*
-     * negative test
-     */
     @Test
-    public void testStoreByteArrayNegative() throws Exception {
-
-        pigServer.registerQuery("A = load '" + basedir + "orc-file-11-format.orc'" + " using OrcStorage();" );
-        Schema s = pigServer.dumpSchema("A");
-        FieldSchema fsc = s.getField("bytes1"); // hive type BINARY
-        assertEquals(DataType.BYTEARRAY, fsc.type); // check pig maps to BYTEARRAY
-
-        try {
-            pigServer.store("A", OUTPUT1, "OrcStorage");
-        } catch (Exception e) {
-            Exception cause = (Exception) e.getCause().getCause();
-            assertEquals(IllegalArgumentException.class, cause.getClass());
-            assertEquals("Unknown data type bytearray", cause.getMessage());
-        }
-    }
-
-    /*
-     * positive test
-     */
-    @Test
-    public void testStoreByteArrayCasted() throws Exception {
+    public void testHandleByteArrayToBinary() throws Exception {
 
         pigServer.registerQuery("A = load '" + basedir + "orc-file-11-format.orc'" + " using OrcStorage()"
-                + " as (boolean1,byte1,short1,int1,long1,float1,double1,bytes1: int,string1,"
+                + " as (boolean1,byte1,short1,int1,long1,float1,double1,bytes1,string1,"
                 + "middle: (list: {(int1,string1)}),list: {(int1,string1)},map: map[(int1,string1)],ts,decimal1);");
         pigServer.store("A", OUTPUT1, "OrcStorage");
         Path outputFilePath = new Path(new Path(OUTPUT1), "part-m-00000");
@@ -254,8 +231,11 @@ public class TestOrcStorageComplexDataTypes {
 
         StructObjectInspector soi = (StructObjectInspector)reader.getObjectInspector();
         StructField sf = soi.getStructFieldRef("bytes1");
-        assertEquals(DataType.INTEGER, DataType.findTypeByName(sf.getFieldObjectInspector().getTypeName())); // since binary typecasted to int
+        assertEquals(TypeInfoFactory.binaryTypeInfo.getTypeName(), sf.getFieldObjectInspector().getTypeName());
 
+        pigServer.registerQuery("A = load '" + OUTPUT1 + "' using OrcStorage();");
+        ExecJob job = pigServer.store("A", OUTPUT2, "PigStorage()");
+        assertEquals(1,job.getStatistics().getNumberSuccessfulJobs());
     }
 
 }
