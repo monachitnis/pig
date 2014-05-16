@@ -83,9 +83,9 @@ import org.apache.pig.impl.util.orc.OrcUtils;
  * <ul>
  * <li><code>-s, --stripeSize</code> Set the stripe size for the file
  * <li><code>-r, --rowIndexStride</code> Set the distance between entries in the row index
- * <li><code>-b, --bufferSize</code> The size of the memory buffers used for compressing and storing the 
+ * <li><code>-b, --bufferSize</code> The size of the memory buffers used for compressing and storing the
  * stripe in memory
- * <li><code>-p, --blockPadding</code> Sets whether the HDFS blocks are padded to prevent stripes 
+ * <li><code>-p, --blockPadding</code> Sets whether the HDFS blocks are padded to prevent stripes
  * from straddling blocks
  * <li><code>-c, --compress</code> Sets the generic compression that is used to compress the data.
  * Valid codecs are: NONE, ZLIB, SNAPPY, LZO
@@ -106,15 +106,15 @@ public class OrcStorage extends LoadFunc implements StoreFuncInterface, LoadMeta
     private Boolean blockPadding;
     private CompressionKind compress;
     private org.apache.hadoop.hive.ql.io.orc.OrcFile.Version version;
-    
+
     private static final Options validOptions;
     private final CommandLineParser parser = new GnuParser();
-    protected final Log log = LogFactory.getLog(getClass());
+    protected final static Log log = LogFactory.getLog(OrcStorage.class);
     protected boolean[] mRequiredColumns = null;
-    
+
     private static final String SchemaSignatureSuffix = "_schema";
     private static final String RequiredColumnsSuffix = "_columns";
-    
+
     static {
         validOptions = new Options();
         validOptions.addOption("s", "stripeSize", true,
@@ -131,10 +131,10 @@ public class OrcStorage extends LoadFunc implements StoreFuncInterface, LoadMeta
         validOptions.addOption("v", "version", true,
                 "Sets the version of the file that will be written");
     }
-    
+
     public OrcStorage() {
     }
-    
+
     public OrcStorage(String options) {
         String[] optsArr = options.split(" ");
         try {
@@ -218,7 +218,9 @@ public class OrcStorage extends LoadFunc implements StoreFuncInterface, LoadMeta
         ResourceFieldSchema fs = new ResourceFieldSchema();
         fs.setType(DataType.TUPLE);
         fs.setSchema(rs);
+        log.info("****** DEBUG ********* Field Schema " + fs.getSchema());
         typeInfo = OrcUtils.getTypeInfo(fs);
+        log.info("****** DEBUG ********* Type Info " + typeInfo.getTypeName());
         Properties p = UDFContext.getUDFContext().getUDFProperties(this.getClass());
         p.setProperty(signature + SchemaSignatureSuffix, ObjectSerializer.serialize(typeInfo));
     }
@@ -241,7 +243,7 @@ public class OrcStorage extends LoadFunc implements StoreFuncInterface, LoadMeta
     public void setStoreFuncUDFContextSignature(String signature) {
         this.signature = signature;
     }
-    
+
     @Override
     public void setUDFContextSignature(String signature) {
         this.signature = signature;
@@ -262,20 +264,25 @@ public class OrcStorage extends LoadFunc implements StoreFuncInterface, LoadMeta
         if (!UDFContext.getUDFContext().isFrontend()) {
             typeInfo = (TypeInfo)ObjectSerializer.deserialize(p.getProperty(signature + SchemaSignatureSuffix));
         }
+        if (typeInfo == null) {
+            typeInfo = getTypeInfoFromLocation(location, job);
+        }
         if (typeInfo!=null && oi==null) {
+            p.setProperty(signature + SchemaSignatureSuffix, ObjectSerializer.serialize(typeInfo));
             oi = OrcStruct.createObjectInspector(typeInfo);
         }
         if (!UDFContext.getUDFContext().isFrontend() &&
-                p.getProperty(signature+RequiredColumnsSuffix)!=null) {
-            mRequiredColumns = (boolean[])ObjectSerializer.deserialize(p.getProperty(signature+RequiredColumnsSuffix));
+                p.getProperty(signature + RequiredColumnsSuffix) != null) {
+            mRequiredColumns = (boolean[]) ObjectSerializer.deserialize(p.getProperty(signature + RequiredColumnsSuffix));
             job.getConfiguration().setBoolean(ColumnProjectionUtils.READ_ALL_COLUMNS, false);
-            job.getConfiguration().set(ColumnProjectionUtils.READ_COLUMN_IDS_CONF_STR, 
-                    getReqiredColumnIdString(mRequiredColumns));
+            job.getConfiguration().set(ColumnProjectionUtils.READ_COLUMN_IDS_CONF_STR,
+                    getRequiredColumnIdString(mRequiredColumns));
         }
+
         FileInputFormat.setInputPaths(job, location);
     }
-    
-    private static String getReqiredColumnIdString(boolean[] requiredColumns) {
+
+    private static String getRequiredColumnIdString(boolean[] requiredColumns) {
         String result = "";
         for (int i=0;i<requiredColumns.length;i++) {
             if (requiredColumns[i]) {
@@ -308,7 +315,6 @@ public class OrcStorage extends LoadFunc implements StoreFuncInterface, LoadMeta
                 return null;
             }
             Object value = in.getCurrentValue();
-            
             Tuple t = (Tuple)OrcUtils.convertOrcToPig(value, oi, mRequiredColumns);
             return t;
         } catch (InterruptedException e) {
@@ -318,7 +324,7 @@ public class OrcStorage extends LoadFunc implements StoreFuncInterface, LoadMeta
                     PigException.REMOTE_ENVIRONMENT, e);
         }
     }
-    
+
     private static Path getFirstFile(String location, FileSystem fs) throws IOException {
         String[] locations = getPathStrings(location);
         Path[] paths = new Path[locations.length];
@@ -327,8 +333,14 @@ public class OrcStorage extends LoadFunc implements StoreFuncInterface, LoadMeta
         }
         List<FileStatus> statusList = new ArrayList<FileStatus>();
         for (int i = 0; i < paths.length; ++i) {
-            for (FileStatus tempf : fs.globStatus(paths[i])) {
-                statusList.add(tempf);
+            // account for fs.globStatus throwing NPE if path does not exist
+            if (fs.exists(paths[i])) {
+                for (FileStatus tempf : fs.globStatus(paths[i])) {
+                    statusList.add(tempf);
+                }
+            }
+            else {
+                return null;
             }
         }
         FileStatus[] statusArray = (FileStatus[]) statusList
@@ -341,21 +353,28 @@ public class OrcStorage extends LoadFunc implements StoreFuncInterface, LoadMeta
         FileSystem fs = FileSystem.get(job.getConfiguration());
         Path path = getFirstFile(location, fs);
         if (path==null) {
-            throw new IOException("Cannot find any ORC files from " + location);
+            log.info("Cannot find any ORC files from " + location + ". Probably multiple load store in script.");
+            return null;
         }
         Reader reader = OrcFile.createReader(fs, path);
         ObjectInspector oip = (ObjectInspector)reader.getObjectInspector();
         return TypeInfoUtils.getTypeInfoFromObjectInspector(oip);
     }
-    
+
     @Override
     public ResourceSchema getSchema(String location, Job job)
             throws IOException {
+        Properties p = UDFContext.getUDFContext().getUDFProperties(this.getClass());
         if (typeInfo==null) {
             typeInfo = getTypeInfoFromLocation(location, job);
-            Properties p = UDFContext.getUDFContext().getUDFProperties(this.getClass());
-            p.setProperty(signature + SchemaSignatureSuffix, ObjectSerializer.serialize(typeInfo));
+            if (typeInfo == null) {
+                typeInfo = (TypeInfo)ObjectSerializer.deserialize(p.getProperty(signature + SchemaSignatureSuffix));
+            }
+            if (typeInfo == null) {
+                return null;
+            }
         }
+        p.setProperty(signature + SchemaSignatureSuffix, ObjectSerializer.serialize(typeInfo));
         ResourceFieldSchema fs = OrcUtils.getResourceFieldSchema(typeInfo);
         return fs.getSchema();
     }

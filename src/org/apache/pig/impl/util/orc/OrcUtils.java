@@ -653,6 +653,7 @@ public class OrcUtils {
     }
 
     public static ObjectInspector createObjectInspector(TypeInfo info) {
+        if (info != null) {
         switch (info.getCategory()) {
         case PRIMITIVE:
           switch (((PrimitiveTypeInfo) info).getPrimitiveCategory()) {
@@ -695,5 +696,7 @@ public class OrcUtils {
           throw new IllegalArgumentException("Unknown type " +
             info.getCategory());
       }
+    }
+        return null;
     }
 }
