@@ -36,6 +36,7 @@ import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
 import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.primitive.BinaryObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.DateObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.HiveDecimalObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
@@ -53,6 +54,7 @@ import org.apache.hadoop.hive.serde2.typeinfo.PrimitiveTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.StructTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
+import org.apache.hadoop.io.BytesWritable;
 import org.apache.pig.ResourceSchema;
 import org.apache.pig.ResourceSchema.ResourceFieldSchema;
 import org.apache.pig.backend.executionengine.ExecException;
@@ -77,6 +79,7 @@ public class OrcUtils {
             List<StructField> elementFields = (List<StructField>) soi.getAllStructFieldRefs();
             List<Object> items = soi.getStructFieldsDataAsList(obj);
             Tuple t = TupleFactory.getInstance().newTuple();
+            if (items != null) { // to account for ORC's book-keeping inside file stripes
             for (int i=0;i<items.size();i++) {
                 if (includedColumns==null || includedColumns[i]) {
                     Object convertedItem = convertOrcToPig(items.get(i), elementFields.get(i).getFieldObjectInspector(), null);
@@ -84,6 +87,7 @@ public class OrcUtils {
                 }
             }
             result = t;
+            }
             break;
         case MAP:
             MapObjectInspector moi = (MapObjectInspector)oi;
@@ -136,7 +140,7 @@ public class OrcUtils {
             break;
         case BINARY:
             byte[] bytes = (byte[]) poi.getPrimitiveJavaObject(obj);
-            result = bytes;
+            result = new DataByteArray(bytes);
             break;
         case TIMESTAMP:
             java.sql.Timestamp origTimeStamp = (java.sql.Timestamp)poi.getPrimitiveJavaObject(obj);
@@ -652,6 +656,25 @@ public class OrcUtils {
         }
     }
 
+    static class PigDataByteArrayObjectInspector extends
+    AbstractPrimitiveJavaObjectInspector implements BinaryObjectInspector {
+
+        PigDataByteArrayObjectInspector() {
+            super(TypeInfoFactory.binaryTypeInfo);
+        }
+
+        @Override
+        public BytesWritable getPrimitiveWritableObject(Object o) {
+            return o == null ? null : new BytesWritable(((DataByteArray) o).get());
+        }
+
+        @Override
+        public byte[] getPrimitiveJavaObject(Object o) {
+          return ((DataByteArray) o).get();
+        }
+
+    }
+
     public static ObjectInspector createObjectInspector(TypeInfo info) {
         if (info != null) {
         switch (info.getCategory()) {
@@ -674,7 +697,7 @@ public class OrcUtils {
             case DECIMAL:
               return new PigDecimalObjectInspector();
             case BINARY:
-                return PrimitiveObjectInspectorFactory.javaByteArrayObjectInspector;
+              return new PigDataByteArrayObjectInspector();
             case DATE:
             case VARCHAR:
             case BYTE:

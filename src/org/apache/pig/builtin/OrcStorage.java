@@ -315,6 +315,9 @@ public class OrcStorage extends LoadFunc implements StoreFuncInterface, LoadMeta
                 return null;
             }
             Object value = in.getCurrentValue();
+            if (value == null) { // account for ORC's book-keeping inside file stripes
+                return null;
+            }
             Tuple t = (Tuple)OrcUtils.convertOrcToPig(value, oi, mRequiredColumns);
             return t;
         } catch (InterruptedException e) {
