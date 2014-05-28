@@ -1,0 +1,32 @@
+{
+  "fields" : [
+    {"name" : "nameagegpamap",
+     "type" : {"type" : "map", "values" : "bytes"}  
+    },
+    {"name" : "nameagegpatuple",
+     "type" : "record",
+     "fields" : [
+         {"name" : "tname", "type" : "string"},
+         {"name" : "tage", "type" : "int"},
+         {"name" : "tgpa", "type" : "float"}
+      ]
+    },
+    {"name" : "nameagegpabag",
+     "type" : {
+       "type" : "array",
+       "items" : {
+         "name" : "t",
+	 "type" : "record",
+         "fields" : [
+             {"name" : "bname", "type" : "string"},
+             {"name" : "bage", "type" : "int"},
+             {"name" : "bgpa", "type" : "float"}
+         ]
+       }
+     }
+    },
+    {"name" : "nameagegpamap_name", "type" : "string"},
+    {"name" : "nameagegpamap_age", "type" : "int"},
+    {"name" : "nameagegpamap_gpa", "type" : "float"}
+  ]
+}
